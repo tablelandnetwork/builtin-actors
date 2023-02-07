@@ -27,12 +27,11 @@ cid = "0.8.6"
 fvm_shared = { version = "3.0.0-alpha.20", default-features = false }
 num-traits = "0.2.15"
 num-derive = "0.3.3"
-hex-literal = "0.3.4"
 fil_actors_evm_shared = { version = "10.0.0-alpha.1", path = "../evm/shared" }
 
 [dev-dependencies]
-fil_actor_evm = { version = "10.0.0-alpha.1", path = "../evm"}
 fil_actors_runtime = { path = "../../runtime", features = ["test_utils"] }
+hex-literal = "0.3.4"
 
 [features]
 fil-actor = ["fil_actors_runtime/fil-actor"]
