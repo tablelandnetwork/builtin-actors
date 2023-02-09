@@ -236,39 +236,6 @@ impl<'db, BS: Blockstore> ExpirationQueue<'db, BS> {
         Ok((sector_numbers, total_power, total_pledge))
     }
 
-    /// Reschedules some sectors to a new (quantized) expiration epoch.
-    /// The sectors being rescheduled are assumed to be not faulty, and hence are removed from and re-scheduled for on-time
-    /// rather than early expiration.
-    /// The sectors' power and pledge are assumed not to change, despite the new expiration.
-    pub fn reschedule_expirations(
-        &mut self,
-        new_expiration: ChainEpoch,
-        sectors: &[SectorOnChainInfo],
-        sector_size: SectorSize,
-    ) -> anyhow::Result<()> {
-        if sectors.is_empty() {
-            return Ok(());
-        }
-
-        let (sector_numbers, power, pledge) = self
-            .remove_active_sectors(sectors, sector_size)
-            .map_err(|e| e.downcast_wrap("failed to remove sector expirations"))?;
-
-        // TODO it reschedules always as on time, add a flag?
-        self.add(
-            new_expiration,
-            &sector_numbers,
-            &BitField::new(),
-            &BitField::new(),
-            &power,
-            &PowerPair::zero(),
-            &pledge,
-        )
-        .map_err(|e| e.downcast_wrap("failed to record new sector expirations"))?;
-
-        Ok(())
-    }
-
     /// Re-schedules sectors to expire at an early expiration epoch (quantized), if they wouldn't expire before then anyway.
     /// The sectors must not be currently faulty, so must be registered as expiring on-time rather than early.
     /// The pledge for the now-early sectors is removed from the queue.
@@ -454,33 +421,29 @@ impl<'db, BS: Blockstore> ExpirationQueue<'db, BS> {
                 recovered_power += &power;
             }
 
-            let mut early_unset = Vec::new();
             for sector_number in expiration_set.proof_expiring_sectors.iter() {
                 let sector = match remaining.remove(&sector_number) {
                     Some(s) => s,
                     None => continue,
                 };
-                // If the sector expires early at this epoch, remove it for re-scheduling.
+                // If the sector expires early at this epoch, leave it here but change faulty power to active.
                 // It's not part of the on-time pledge number here.
-                early_unset.push(sector_number);
                 let power = power_for_sector(sector_size, sector);
                 faulty_power_delta -= &power;
-                sectors_rescheduled.push(sector);
+                active_power_delta += &power;
 
                 recovered_power += &power;
             }
 
             // we need to defer the changes as we cannot borrow immutably for iteration
             // and mutably for changes at the same time
-            if !early_unset.is_empty()
-                || !faulty_unset.is_empty()
+            if !faulty_unset.is_empty()
                 || !faulty_power_delta.is_zero()
                 || !active_power_delta.is_zero()
             {
                 expiration_set.active_power += &active_power_delta;
                 expiration_set.faulty_power += &faulty_power_delta;
 
-                expiration_set.proof_expiring_sectors -= BitField::try_from_bits(early_unset)?;
                 expiration_set.faulty_sectors -= BitField::try_from_bits(faulty_unset)?;
                 expiration_set.validate_state()?;
             }
