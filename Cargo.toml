@@ -29,6 +29,7 @@ fil_actor_power = { version = "11.0.0", path = "./actors/power", features = ["fi
 fil_actor_reward = { version = "11.0.0", path = "./actors/reward", features = ["fil-actor"] }
 fil_actor_system = { version = "11.0.0", path = "./actors/system", features = ["fil-actor"] }
 fil_actor_verifreg = { version = "11.0.0", path = "./actors/verifreg", features = ["fil-actor"] }
+fil_actor_query = { version = "11.0.0", path = "./actors/query", features = ["fil-actor"] }
 
 [build-dependencies]
 fil_actor_bundler = "5.0.0"
