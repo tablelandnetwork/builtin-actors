@@ -32,8 +32,11 @@ hex-literal = "0.3.4"
 fil_actors_evm_shared = { version = "11.0.0", path = "../evm/shared" }
 
 serde_ipld_dagcbor = "0.3.0"
-parquet = { version= "40.0.0", default-features = false, features = ["arrow"] }
+#parquet = { version= "40.0.0", default-features = false, features = ["arrow"] }
 bytes = "1.4.0"
+rusqlite = { path = "../../../../trevyn/rusqlite", features = ["bundled"] }
+sqlite-vfs = { path = "../../../../rkusa/sqlite-vfs" }
+getrandom = { version = "0.2.10", features = ["custom"] }
 
 [dev-dependencies]
 fil_actors_runtime = { path = "../../runtime", features = ["test_utils"] }
