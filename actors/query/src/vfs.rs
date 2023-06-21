@@ -1,19 +1,15 @@
+use crate::State;
+use fil_actors_runtime::runtime::{DomainSeparationTag, Runtime};
+use fvm_ipld_encoding::CborStore;
+use multihash::Code;
+use sqlite_vfs::{LockKind, OpenKind, OpenOptions, Vfs};
 use std::io::{self, ErrorKind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-// use ic_cdk::api::stable::{stable64_read, stable64_size, stable64_write};
 
-use sqlite_vfs::{LockKind, OpenKind, OpenOptions, Vfs};
-// use crate::{stable_capacity, stable_grow_bytes};
-// use fil_actors_runtime::runtime::Runtime;
-
-const SQLITE_SIZE_IN_BYTES: u64 = 8; // 8 byte
-
-// #[derive(Default)]
-pub struct PagesVfs {
+pub struct PagesVfs<'r, const PAGE_SIZE: usize, RT: Runtime> {
     lock_state: Arc<Mutex<LockState>>,
-    read: fn(offset: u64, buf: &mut [u8]),
-    write: fn(offset: u64, buf: &[u8]),
+    rt: &'r RT,
 }
 
 #[derive(Debug, Default)]
@@ -22,33 +18,39 @@ struct LockState {
     write: Option<bool>,
 }
 
-pub struct Connection {
+pub struct Connection<'r, const PAGE_SIZE: usize, RT: Runtime>
+where
+    RT::Blockstore: Clone,
+{
     lock_state: Arc<Mutex<LockState>>,
     lock: LockKind,
-    read: fn(offset: u64, buf: &mut [u8]),
-    write: fn(offset: u64, buf: &[u8]),
+    rt: &'r RT,
 }
 
-impl PagesVfs {
-    pub fn new_with_runtime(
-        read: fn(offset: u64, buf: &mut [u8]),
-        write: fn(offset: u64, buf: &[u8]),
-    ) -> Self {
-        PagesVfs { lock_state: Arc::new(Mutex::new(Default::default())), read, write }
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> PagesVfs<'r, PAGE_SIZE, RT> {
+    pub fn new(rt: &'r RT) -> Self
+    where
+        RT::Blockstore: Clone,
+    {
+        PagesVfs { lock_state: Arc::new(Mutex::new(Default::default())), rt }
     }
 }
 
-impl Vfs for PagesVfs {
-    type Handle = Connection;
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Vfs for PagesVfs<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
+    type Handle = Connection<'r, PAGE_SIZE, RT>;
 
     fn open(&self, db: &str, opts: OpenOptions) -> Result<Self::Handle, io::Error> {
         // Always open the same database for now.
         if db != "main.db" {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
-                format!("unexpected database name `{}`; expected `main.db`", db),
+                format!("unexpected database name `{db}`; expected `main.db3`"),
             ));
         }
+
         // Only main databases supported right now (no journal, wal, temporary, ...)
         if opts.kind != OpenKind::MainDb {
             return Err(io::Error::new(
@@ -57,21 +59,18 @@ impl Vfs for PagesVfs {
             ));
         }
 
-        Ok(Connection {
-            lock_state: self.lock_state.clone(),
-            lock: LockKind::None,
-            read: self.read,
-            write: self.write,
-        })
+        Ok(Connection { lock_state: self.lock_state.clone(), lock: LockKind::None, rt: self.rt })
     }
 
     fn delete(&self, _db: &str) -> Result<(), io::Error> {
+        // Only used to delete journal or wal files, which both are not implemented yet, thus simply
+        // ignored for now.
         Ok(())
     }
 
     fn exists(&self, db: &str) -> Result<bool, io::Error> {
-        // Ok(db == "main.db" && Connection::size() > 0)
-        Ok(db == "main.db")
+        let st: State = self.rt.state().unwrap();
+        Ok(db == "main.db" && st.db.pages.len() > 0)
     }
 
     fn temporary_name(&self) -> String {
@@ -79,39 +78,77 @@ impl Vfs for PagesVfs {
     }
 
     fn random(&self, buffer: &mut [i8]) {
-        let data =
-            (0..buffer.len()).map(|_| ((123345678910 as u128) % 256) as i8).collect::<Vec<_>>();
-        buffer.copy_from_slice(&data);
+        // NOTE (sander): We don't have access to OS randomness:
+        //   rand::Rng::fill(&mut rand::thread_rng(), buffer);
+        // NOTE (sander): I'm trying to use one of the runtime randomness methods.
+        // I pulled the rand_epoch and entropy from the evm actor's usage of
+        // this method, but I don't know if it will actually work / lead to problems.
+        let randomness = self
+            .rt
+            .get_randomness_from_beacon(
+                DomainSeparationTag::EvmPrevRandao,
+                self.rt.curr_epoch(),
+                b"prevrandao",
+            )
+            .unwrap()
+            .map(|x| x as i8);
+        buffer[..randomness.len()].copy_from_slice(&randomness);
     }
 
-    fn sleep(&self, duration: Duration) -> Duration {
-        // let now = Instant::now;
-        // conn_sleep((duration.as_millis() as u32).max(1));
-        // now.elapsed()
-        Duration::from_millis(1)
+    fn sleep(&self, _duration: Duration) -> Duration {
+        // NOTE (sander): We don't have access to OS time or CPU and therefore cannot sleep.
+        // Is this safe? Probably not!
+        Duration::from_millis(0)
     }
 }
 
-impl sqlite_vfs::DatabaseHandle for Connection {
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> sqlite_vfs::DatabaseHandle
+    for Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
     type WalIndex = sqlite_vfs::WalDisabled;
 
     fn size(&self) -> Result<u64, io::Error> {
-        Ok(self.size())
+        let size = self.page_count() * PAGE_SIZE;
+        eprintln!("size={size}");
+        Ok(size as u64)
     }
 
     fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> Result<(), io::Error> {
-        if stable64_size() > 0 {
-            (self.read)(offset + SQLITE_SIZE_IN_BYTES, buf);
+        let index = offset as usize / PAGE_SIZE;
+        let offset = offset as usize % PAGE_SIZE;
+
+        let data = self.get_page(index as u32);
+        if data.len() < buf.len() + offset {
+            eprintln!("read {} < {} -> UnexpectedEof", data.len(), buf.len() + offset);
+            return Err(ErrorKind::UnexpectedEof.into());
         }
+
+        eprintln!("read index={} len={} offset={}", index, buf.len(), offset);
+        buf.copy_from_slice(&data[offset..offset + buf.len()]);
+
         Ok(())
     }
 
     fn write_all_at(&mut self, buf: &[u8], offset: u64) -> Result<(), io::Error> {
-        let size = offset + buf.len() as u64;
-        if size > self.size() {
-            (self.write)(0, &size.to_be_bytes());
+        if offset as usize % PAGE_SIZE > 0 {
+            return Err(io::Error::new(
+                ErrorKind::Other,
+                "unexpected write across page boundaries",
+            ));
         }
-        (self.write)(offset + SQLITE_SIZE_IN_BYTES, buf);
+
+        let index = offset as usize / PAGE_SIZE;
+        let page = buf.try_into().map_err(|_| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("unexpected write size {}; expected {}", buf.len(), PAGE_SIZE),
+            )
+        })?;
+        eprintln!("write index={} len={}", index, buf.len());
+        self.put_page(index as u32, page);
+
         Ok(())
     }
 
@@ -121,18 +158,31 @@ impl sqlite_vfs::DatabaseHandle for Connection {
     }
 
     fn set_len(&mut self, size: u64) -> Result<(), io::Error> {
-        let capacity =
-            if stable64_size() == 0 { 0 } else { stable_capacity() - SQLITE_SIZE_IN_BYTES };
-        if size > capacity {
-            stable_grow_bytes(size - capacity)
-                .map_err(|err| io::Error::new(ErrorKind::OutOfMemory, err))?;
-            (self.write)(0, &size.to_be_bytes());
+        eprintln!("set_len={size}");
+
+        let mut page_count = size as usize / PAGE_SIZE;
+        if size as usize % PAGE_SIZE > 0 {
+            page_count += 1;
         }
+
+        let current_page_count = self.page_count();
+        if page_count > 0 && page_count < current_page_count {
+            // NOTE (sander): The example VFS removed pages in the following way:
+            //   for i in (page_count..current_page_count).into_iter().rev() {
+            //       self.del_page(i as u32);
+            //   }
+            // Because, AFAICT, pages are never removed from the middle of the database,
+            // we may as well remove them all at once from the end. This saves
+            // multiple roundtrips to the blockstore.
+            self.del_last_pages(page_count as u32);
+        }
+
         Ok(())
     }
 
     fn lock(&mut self, lock: LockKind) -> Result<bool, io::Error> {
         let ok = Self::lock(self, lock);
+        eprintln!("locked = {}", ok);
         Ok(ok)
     }
 
@@ -144,19 +194,74 @@ impl sqlite_vfs::DatabaseHandle for Connection {
         Ok(self.lock)
     }
 
+    fn set_chunk_size(&self, chunk_size: usize) -> Result<(), io::Error> {
+        if chunk_size != PAGE_SIZE {
+            eprintln!("set_chunk_size={chunk_size} (rejected)");
+            Err(io::Error::new(ErrorKind::Other, "changing chunk size is not allowed"))
+        } else {
+            eprintln!("set_chunk_size={chunk_size}");
+            Ok(())
+        }
+    }
+
     fn wal_index(&self, _readonly: bool) -> Result<Self::WalIndex, io::Error> {
         Ok(sqlite_vfs::WalDisabled::default())
     }
 }
 
-impl Connection {
-    fn size(&self) -> u64 {
-        if stable64_size() == 0 {
-            return 0;
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
+    fn get_page(&self, ix: u32) -> [u8; PAGE_SIZE] {
+        let st: State = self.rt.state().unwrap();
+        eprintln!("get_page; current state: {:?}", st.db);
+
+        // Fetch page
+        let page: Vec<u8> = self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
+
+        // Return a copy
+        let mut data = [0u8; PAGE_SIZE];
+        data.copy_from_slice(&page);
+        data
+    }
+
+    fn put_page(&self, ix: u32, data: &[u8; PAGE_SIZE]) {
+        let mut st: State = self.rt.state().unwrap();
+        eprintln!("put_page; current state: {:?}", st.db);
+
+        // Add the new page to the blockstore
+        let page = self.rt.store().put_cbor(&data.to_vec(), Code::Blake2b256).unwrap();
+
+        // Add or replace in page state
+        if ix as usize == st.db.pages.len() {
+            st.db.pages.push(page);
+        } else {
+            st.db.pages[ix as usize] = page;
         }
-        let mut buf = [0u8; SQLITE_SIZE_IN_BYTES as usize];
-        (self.read)(0, &mut buf);
-        u64::from_be_bytes(buf)
+
+        // Save new state
+        let new_root = self.rt.store().put_cbor(&st, Code::Blake2b256).unwrap();
+        self.rt.set_state_root(&new_root).unwrap();
+    }
+
+    fn del_last_pages(&self, retain: u32) {
+        let mut st: State = self.rt.state().unwrap();
+        eprintln!("del_last_pages; current state: {:?}", st.db);
+
+        // Retain some pages
+        st.db.pages = st.db.pages[..(retain as usize) * PAGE_SIZE].to_vec();
+
+        // Save new state
+        let new_root = self.rt.store().put_cbor(&st, Code::Blake2b256).unwrap();
+        self.rt.set_state_root(&new_root).unwrap();
+    }
+
+    fn page_count(&self) -> usize {
+        let st: State = self.rt.state().unwrap();
+        eprintln!("page_count; current state: {:?}", st.db);
+
+        st.db.pages.len()
     }
 
     fn lock(&mut self, to: LockKind) -> bool {
@@ -165,6 +270,14 @@ impl Connection {
         }
 
         let mut lock_state = self.lock_state.lock().unwrap();
+
+        // eprintln!(
+        //     "lock state={:?} from={:?} to={:?}",
+        //     lock_state, self.lock, to
+        // );
+
+        // The following locking implementation is probably not sound (wouldn't be surprised if it
+        // potentially dead-locks), but suffice for the experiment.
 
         match to {
             LockKind::None => {
@@ -239,97 +352,13 @@ impl Connection {
     }
 }
 
-impl Drop for Connection {
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Drop for Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
     fn drop(&mut self) {
         if self.lock != LockKind::None {
             self.lock(LockKind::None);
         }
-    }
-}
-
-fn conn_sleep(ms: u32) {
-    // std::thread::sleep(Duration::from_secs(ms.into()));
-}
-
-pub fn stable64_size() -> u64 {
-    512 * 1024 * 1024
-}
-
-// pub fn stable64_read(offset: u64, buf: &mut [u8]) {
-//     // CANISTER_STABLE_MEMORY.stable64_read(offset, buf)
-// }
-//
-// pub fn stable64_write(offset: u64, buf: &[u8]) {
-//     // CANISTER_STABLE_MEMORY.stable64_write(offset, buf)
-// }
-
-const WASM_PAGE_SIZE_IN_BYTES: u64 = 64 * 1024; // 64KB
-
-/// Gets capacity of the stable memory in bytes.
-pub fn stable_capacity() -> u64 {
-    stable64_size() << 16
-}
-
-/// Attempts to grow the memory by adding new pages.
-pub fn stable_grow_bytes(size: u64) -> Result<u64, StableMemoryError> {
-    let added_pages = (size as f64 / WASM_PAGE_SIZE_IN_BYTES as f64).ceil() as u64;
-    stable64_grow(added_pages)
-}
-
-pub fn stable64_grow(new_pages: u64) -> Result<u64, StableMemoryError> {
-    // CANISTER_STABLE_MEMORY.stable64_grow(new_pages)
-    Ok(0)
-}
-
-#[derive(Debug)]
-pub enum StableMemoryError {
-    /// No more stable memory could be allocated.
-    OutOfMemory,
-    /// Attempted to read more stable memory than had been allocated.
-    OutOfBounds,
-}
-
-impl std::fmt::Display for StableMemoryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::OutOfMemory => f.write_str("Out of memory"),
-            Self::OutOfBounds => f.write_str("Read exceeds allocated memory"),
-        }
-    }
-}
-
-impl std::error::Error for StableMemoryError {}
-
-pub trait StableMemory {
-    /// Similar to `stable_size` but with support for 64-bit addressed memory.
-    fn stable64_size(&self) -> u64;
-
-    /// Similar to `stable_grow` but with support for 64-bit addressed memory.
-    fn stable64_grow(&self, new_pages: u64) -> Result<u64, StableMemoryError>;
-
-    /// Similar to `stable_write` but with support for 64-bit addressed memory.
-    fn stable64_write(&self, offset: u64, buf: &[u8]);
-
-    /// Similar to `stable_read` but with support for 64-bit addressed memory.
-    fn stable64_read(&self, offset: u64, buf: &mut [u8]);
-}
-
-struct Memory {}
-
-impl StableMemory for Memory {
-    fn stable64_size(&self) -> u64 {
-        todo!()
-    }
-
-    fn stable64_grow(&self, new_pages: u64) -> Result<u64, StableMemoryError> {
-        todo!()
-    }
-
-    fn stable64_write(&self, offset: u64, buf: &[u8]) {
-        todo!()
-    }
-
-    fn stable64_read(&self, offset: u64, buf: &mut [u8]) {
-        todo!()
     }
 }
