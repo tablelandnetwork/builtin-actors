@@ -1,5 +1,5 @@
-use fil_actor_query::types::{ConstructorParams, QueryReturn};
-use fil_actor_query::{Actor as QueryActor, Method, State};
+use fil_actor_tableland::types::{ConstructorParams, QueryReturn};
+use fil_actor_tableland::{Actor as TablelandActor, Method, State};
 use fil_actors_runtime::builtin::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::test_utils::*;
 use fvm_ipld_encoding::ipld_block::IpldBlock;
@@ -26,7 +26,7 @@ fn construction() {
         );
 
         if exit_code.is_success() {
-            rt.call::<QueryActor>(
+            rt.call::<TablelandActor>(
                 Method::Constructor as MethodNum,
                 IpldBlock::serialize_dag_cbor(&ConstructorParams { db: db.to_vec() }).unwrap(),
             )
@@ -37,13 +37,13 @@ fn construction() {
             rt.expect_validate_caller_any();
 
             let ret: IpldBlock =
-                rt.call::<QueryActor>(Method::Query as MethodNum, None).unwrap().unwrap();
+                rt.call::<TablelandActor>(Method::Query as MethodNum, None).unwrap().unwrap();
             let foo = serde_ipld_dagcbor::from_slice::<QueryReturn>(ret.data.as_slice()).unwrap();
             println!("{}", std::str::from_utf8(foo.ret.as_slice()).unwrap());
         } else {
             expect_abort(
                 exit_code,
-                rt.call::<QueryActor>(1, IpldBlock::serialize_dag_cbor(&db).unwrap()),
+                rt.call::<TablelandActor>(1, IpldBlock::serialize_dag_cbor(&db).unwrap()),
             )
         }
         rt.verify();

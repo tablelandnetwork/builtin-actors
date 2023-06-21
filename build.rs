@@ -30,7 +30,7 @@ const ACTORS: &[(&Package, &ID)] = &[
     ("evm", "evm"),
     ("eam", "eam"),
     ("ethaccount", "ethaccount"),
-    ("query", "query"),
+    ("tableland", "tableland"),
 ];
 
 /// Default Cargo features to activate during the build.

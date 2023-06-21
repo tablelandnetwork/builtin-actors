@@ -2045,33 +2045,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fil_actor_query"
-version = "11.0.0"
-dependencies = [
- "anyhow",
- "bytes",
- "cid",
- "fil_actors_evm_shared",
- "fil_actors_runtime",
- "fvm_ipld_blockstore",
- "fvm_ipld_encoding",
- "fvm_ipld_hamt",
- "fvm_shared",
- "getrandom",
- "hex-literal",
- "log",
- "multihash",
- "num-derive",
- "num-traits",
- "rlp",
- "rusqlite",
- "serde",
- "serde_ipld_dagcbor 0.3.0",
- "serde_tuple",
- "sqlite-vfs",
-]
-
-[[package]]
 name = "fil_actor_reward"
 version = "11.0.0"
 dependencies = [
@@ -2100,6 +2073,33 @@ dependencies = [
  "num-derive",
  "num-traits",
  "serde",
+]
+
+[[package]]
+name = "fil_actor_tableland"
+version = "11.0.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cid",
+ "fil_actors_evm_shared",
+ "fil_actors_runtime",
+ "fvm_ipld_blockstore",
+ "fvm_ipld_encoding",
+ "fvm_ipld_hamt",
+ "fvm_shared",
+ "getrandom",
+ "hex-literal",
+ "log",
+ "multihash",
+ "num-derive",
+ "num-traits",
+ "rlp",
+ "rusqlite",
+ "serde",
+ "serde_ipld_dagcbor 0.3.0",
+ "serde_tuple",
+ "sqlite-vfs",
 ]
 
 [[package]]
@@ -2192,9 +2192,9 @@ dependencies = [
  "fil_actor_paych",
  "fil_actor_placeholder",
  "fil_actor_power",
- "fil_actor_query",
  "fil_actor_reward",
  "fil_actor_system",
+ "fil_actor_tableland",
  "fil_actor_verifreg",
  "fil_actors_runtime",
  "num-traits",

@@ -13,7 +13,7 @@ use getrandom::register_custom_getrandom;
 use getrandom::Error;
 use num_derive::FromPrimitive;
 use rusqlite::{Connection, OpenFlags, Result};
-use sqlite_vfs::{register, Vfs};
+use sqlite_vfs::register;
 use types::{ConstructorParams, QueryReturn};
 
 #[cfg(feature = "fil-actor")]
@@ -32,7 +32,7 @@ register_custom_getrandom!(randomness);
 
 const SQLITE_PAGE_SIZE: usize = 4096;
 
-/// DB actor methods available
+/// Tableland actor methods available
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
@@ -46,7 +46,7 @@ struct Person {
     name: String,
 }
 
-/// DB Actor
+/// Tableland Actor
 pub struct Actor;
 
 impl Actor {
@@ -131,7 +131,7 @@ impl ActorCode for Actor {
     type Methods = Method;
 
     fn name() -> &'static str {
-        "Query"
+        "Tableland"
     }
 
     actor_dispatch! {
