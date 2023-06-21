@@ -1,16 +1,15 @@
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_shared::address::Address;
 use fvm_shared::error::ExitCode;
-use fvm_shared::{MethodNum, IPLD_RAW};
-
+use fvm_shared::MethodNum;
 // use fil_actor_query::types::QueryReturn;
-use fil_actor_query::types::QueryReturn;
+use fil_actor_query::types::{ConstructorParams, QueryReturn};
 use fil_actor_query::{Actor as QueryActor, Method, State};
 use fil_actors_runtime::builtin::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::test_utils::*;
 // use fil_actors_runtime::FIRST_EXPORTED_METHOD_NUMBER;
 
-static DATA: &[u8] = include_bytes!("../testdata/data.parquet");
+static DATA: &[u8] = include_bytes!("../testdata/foo.db");
 
 #[test]
 fn construction() {
@@ -19,12 +18,10 @@ fn construction() {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
 
-        // let params = Some(IpldBlock::serialize(IPLD_RAW, db).unwrap());
-
         if exit_code.is_success() {
             rt.call::<QueryActor>(
                 Method::Constructor as MethodNum,
-                IpldBlock::serialize_cbor(db).unwrap(),
+                IpldBlock::serialize_dag_cbor(&ConstructorParams { db: db.to_vec() }).unwrap(),
             )
             .unwrap();
 
@@ -35,11 +32,11 @@ fn construction() {
 
             let ret: IpldBlock =
                 rt.call::<QueryActor>(Method::Query as MethodNum, None).unwrap().unwrap();
-
+            //
             let foo = serde_ipld_dagcbor::from_slice::<QueryReturn>(ret.data.as_slice()).unwrap();
             // .deserialize()
             // .unwrap();
-            println!("{}", foo.ret.len());
+            println!("{}", std::str::from_utf8(foo.ret.as_slice()).unwrap());
             // assert_eq!(ret, db);
         } else {
             expect_abort(

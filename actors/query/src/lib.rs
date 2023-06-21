@@ -1,42 +1,30 @@
-use bytes::{Buf, Bytes};
-use fvm_ipld_blockstore::{Block, Blockstore};
-use fvm_ipld_encoding::ipld_block::IpldBlock;
-use fvm_ipld_encoding::CborStore;
-use fvm_shared::error::ExitCode;
-use fvm_shared::{MethodNum, IPLD_RAW, METHOD_CONSTRUCTOR};
-use multihash::Code;
-use num_derive::FromPrimitive;
-// use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+mod state;
+pub mod types;
+pub mod vfs2;
 
+pub use self::state::{State, DB};
 use fil_actors_runtime::builtin::singletons::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{actor_dispatch, FIRST_EXPORTED_METHOD_NUMBER};
-use fil_actors_runtime::{actor_error, ActorError, AsActorError};
-use types::{ConstructorParams, QueryReturn};
-
-use crate::vfs2::Storage;
+use fil_actors_runtime::{actor_error, ActorError};
+use fvm_ipld_encoding::ipld_block::IpldBlock;
+// use fvm_ipld_encoding::CborStore;
+// use fvm_shared::error::ExitCode;
+use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 use getrandom::register_custom_getrandom;
 use getrandom::Error;
-use rusqlite::StatementStatus::Run;
+use num_derive::FromPrimitive;
 use rusqlite::{Connection, OpenFlags, Result};
-use sqlite_vfs::{register, RegisterError};
+use sqlite_vfs::register;
+use types::{ConstructorParams, QueryReturn};
 
 pub fn randomness(buf: &mut [u8]) -> Result<(), Error> {
-    // let foo = "foo".as_bytes();
     let data = (0..buf.len()).map(|_| ((123345678910 as u128) % 256) as u8).collect::<Vec<_>>();
     buf.copy_from_slice(&data);
     Ok(())
 }
 
 register_custom_getrandom!(randomness);
-
-pub use self::state::State;
-
-mod state;
-// pub mod testing;
-pub mod types;
-// pub mod vfs;
-pub mod vfs2;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -62,30 +50,22 @@ impl Actor {
     pub fn constructor(rt: &impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&SYSTEM_ACTOR_ADDR))?;
 
-        let db = rt
-            .store()
-            .put_cbor(&params.db, Code::Blake2b256)
-            .context_code(ExitCode::USR_ILLEGAL_STATE, "failed to write db")?;
+        let db = DB::new(rt.store(), params.db, 4096);
+        // let db_cid = rt
+        //     .store()
+        //     .put_cbor(&db, Code::Blake2b256)
+        //     .context_code(ExitCode::USR_ILLEGAL_STATE, "failed to write db")?;
 
         rt.create(&State { db })?;
         Ok(())
     }
 
-    pub fn query(rt: &impl Runtime) -> Result<QueryReturn, ActorError> {
+    pub fn query<RT>(rt: &RT) -> Result<QueryReturn, ActorError>
+    where
+        RT: Runtime,
+        RT::Blockstore: Clone,
+    {
         rt.validate_immediate_caller_accept_any()?;
-
-        let st: State = rt.state()?;
-        let db: Vec<u8> = rt.store().get_cbor(&st.db).unwrap().unwrap();
-
-        // let file = Bytes::from(db.clone());
-        // let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
-        // println!("Converted arrow schema is: {}", builder.schema());
-        // let mut reader = builder.build().unwrap();
-        // let record_batch = reader.next().unwrap().unwrap();
-
-        // println!("Read {} records.", record_batch.num_rows());
-        //
-        // Ok(QueryReturn { ret: db })
 
         // const SQLITE_OK: i32 = 0;
         // const SQLITE_ERROR: i32 = 1;
@@ -96,22 +76,9 @@ impl Actor {
         //     Err(RegisterError::Register(code)) => code,
         // }
 
-        let storage: Storage();
+        // let is_new = page_count() == 0;
 
-        let page_count = || -> u32 { 1 };
-        let get_page = |ix: u32, ptr: *mut u8| unsafe {
-            let mut buf: &[u8] = std::slice::from_raw_parts(ptr, 4096 as usize);
-            buf.copy_from_slice(&db[..4096])
-        };
-        let put_page = |ix: u32, ptr: *const u8| {};
-        let del_page = |ix: u32| {};
-
-        register(
-            "vfs",
-            vfs2::PagesVfs::<4096>::new(page_count, get_page, put_page, del_page),
-            true,
-        )
-        .unwrap();
+        register("vfs", vfs2::PagesVfs::<4096, RT>::new(rt), true).unwrap();
         let conn = Connection::open_with_flags_and_vfs(
             "main.db",
             OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -128,15 +95,20 @@ impl Actor {
         )
         .unwrap();
 
-        // let conn = Connection::open_in_memory().unwrap();
-
-        let res = conn
-            .execute("CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT NOT NULL)", [])
-            .unwrap();
+        match conn.execute("CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT NOT NULL)", []) {
+            Ok(s) => println!("created table of size {}", s),
+            Err(e) => {
+                return Err(ActorError::unspecified(format!(
+                    "error creating table {}",
+                    e.to_string()
+                )))
+            }
+        }
         let me = Person { id: 0, name: "Steven".to_string() };
         conn.execute("INSERT INTO person (name) VALUES (?1)", [&me.name]).unwrap();
 
         let mut stmt = conn.prepare("SELECT id, name FROM person").unwrap();
+        // let mut stmt = conn.prepare("SELECT * from bar").unwrap();
         let person_iter =
             stmt.query_map([], |row| Ok(Person { id: row.get(0)?, name: row.get(1)? })).unwrap();
 

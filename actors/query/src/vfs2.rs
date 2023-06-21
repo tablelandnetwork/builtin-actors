@@ -1,33 +1,16 @@
+use crate::{State, DB};
+use fil_actors_runtime::cbor::serialize_vec;
+use fil_actors_runtime::runtime::{DomainSeparationTag, Runtime};
+use fvm_ipld_encoding::CborStore;
+use multihash::Code;
+use sqlite_vfs::{LockKind, OpenKind, OpenOptions, Vfs};
 use std::io::{self, ErrorKind};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sqlite_vfs::{LockKind, OpenKind, OpenOptions, Vfs};
-
-#[derive(Debug, Clone)]
-pub struct Storage {}
-
-impl Storage {
-    pub fn page_count(&self) -> u32 {
-        1
-    }
-
-    pub fn get_page(&self, ix: u32, ptr: *mut u8) {}
-
-    pub fn put_page(&self, ix: u32, ptr: *const u8) {}
-
-    pub fn del_page(&self, ix: u32) {}
-}
-
-// #[derive(Default)]
-pub struct PagesVfs<const PAGE_SIZE: usize> {
+pub struct PagesVfs<'r, const PAGE_SIZE: usize, RT: Runtime> {
     lock_state: Arc<Mutex<LockState>>,
-    storage: Storage,
-    // page_count: Box<dyn Fn() -> u32>,
-    // get_page: Box<dyn Fn(u32, *mut u8)>,
-    // put_page: Box<dyn Fn(u32, *const u8)>,
-    // del_page: Box<dyn Fn(u32)>,
-    // conn_sleep: Box<dyn Fn(u32)>,
+    rt: &'r RT,
 }
 
 #[derive(Debug, Default)]
@@ -36,39 +19,29 @@ struct LockState {
     write: Option<bool>,
 }
 
-pub struct Connection<const PAGE_SIZE: usize> {
+pub struct Connection<'r, const PAGE_SIZE: usize, RT: Runtime>
+where
+    RT::Blockstore: Clone,
+{
     lock_state: Arc<Mutex<LockState>>,
     lock: LockKind,
-    storage: Storage,
-    // page_count: Box<dyn Fn() -> u32>,
-    // get_page: Box<dyn Fn(u32, *mut u8)>,
-    // put_page: Box<dyn Fn(u32, *const u8)>,
-    // del_page: Box<dyn Fn(u32)>,
-    // conn_sleep: Box<dyn Fn(u32) + Sync>,
+    rt: &'r RT,
 }
 
-impl<const PAGE_SIZE: usize> PagesVfs<PAGE_SIZE> {
-    pub fn new(
-        storage: Storage,
-        // page_count: Box<dyn Fn() -> u32>,
-        // get_page: Box<dyn Fn(u32, *mut u8)>,
-        // put_page: Box<dyn Fn(u32, *const u8)>,
-        // del_page: Box<dyn Fn(u32)>,
-        // conn_sleep: Box<dyn Fn(u32)>,
-    ) -> Self {
-        PagesVfs {
-            lock_state: Arc::new(Mutex::new(Default::default())),
-            storage, // page_count,
-                     // get_page,
-                     // put_page,
-                     // del_page,
-                     // conn_sleep,
-        }
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> PagesVfs<'r, PAGE_SIZE, RT> {
+    pub fn new(rt: &'r RT) -> Self
+    where
+        RT::Blockstore: Clone,
+    {
+        PagesVfs { lock_state: Arc::new(Mutex::new(Default::default())), rt }
     }
 }
 
-impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
-    type Handle = Connection<PAGE_SIZE>;
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Vfs for PagesVfs<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
+    type Handle = Connection<'r, PAGE_SIZE, RT>;
 
     fn open(&self, db: &str, opts: OpenOptions) -> Result<Self::Handle, io::Error> {
         // Always open the same database for now.
@@ -87,16 +60,7 @@ impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
             ));
         }
 
-        Ok(Connection {
-            lock_state: self.lock_state.clone(),
-            lock: LockKind::None,
-            storage: self.storage.clone(),
-            // page_count: self.page_count,
-            // get_page: self.get_page,
-            // put_page: self.put_page,
-            // del_page: self.del_page,
-            // conn_sleep: self.conn_sleep,
-        })
+        Ok(Connection { lock_state: self.lock_state.clone(), lock: LockKind::None, rt: self.rt })
     }
 
     fn delete(&self, _db: &str) -> Result<(), io::Error> {
@@ -106,8 +70,8 @@ impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
     }
 
     fn exists(&self, db: &str) -> Result<bool, io::Error> {
-        // Ok(db == "main.db" && Connection::<PAGE_SIZE>::page_count() > 0)
-        Ok(db == "main.db")
+        let st: State = self.rt.state().unwrap();
+        Ok(db == "main.db" && st.db.pages.len() > 0)
     }
 
     fn temporary_name(&self) -> String {
@@ -115,22 +79,44 @@ impl<const PAGE_SIZE: usize> Vfs for PagesVfs<PAGE_SIZE> {
     }
 
     fn random(&self, buffer: &mut [i8]) {
-        // getrandom::getrandom(buffer);
-        // rand::Rng::fill(&mut rand::thread_rng(), buffer);
-        let data =
-            (0..buffer.len()).map(|_| ((123345678910 as u128) % 256) as i8).collect::<Vec<_>>();
-        buffer.copy_from_slice(&data);
+        // NOTE (sander): We don't have access to OS randomness:
+        //   rand::Rng::fill(&mut rand::thread_rng(), buffer);
+        // NOTE (sander): I'm trying to use one of the runtime randomness methods.
+        // I pulled the rand_epoch and entropy from the miner and evm actors usage of
+        // this method, but I don't know if this will actually work / lead to problems.
+        let receiver_bytes =
+            serialize_vec(&self.rt.message().receiver(), "receiver address").unwrap();
+        let rand_epoch = self.rt.curr_epoch();
+        let randomness = self
+            .rt
+            .get_randomness_from_tickets(
+                DomainSeparationTag::EvmPrevRandao,
+                self.rt.curr_epoch(),
+                &receiver_bytes,
+            )
+            .unwrap()
+            .map(|x| x as i8);
+
+        // let data =
+        //     (0..buffer.len()).map(|_| ((123345678910 as u128) % 256) as i8).collect::<Vec<_>>();
+        buffer.copy_from_slice(&randomness[..buffer.len()]);
     }
 
     fn sleep(&self, _duration: Duration) -> Duration {
-        // let now = Instant::now();
-        // unsafe { crate::conn_sleep((duration.as_millis() as u32).max(1)) };
-        // now.elapsed()
-        Duration::from_millis(1)
+        // NOTE (sander): We don't have access to OS time or CPU and therefore cannot sleep.
+        //   let now = Instant::now();
+        //   unsafe { crate::conn_sleep((duration.as_millis() as u32).max(1)) };
+        //   now.elapsed()
+        // NOTE (sander): I don't know if just not sleeping is safe!
+        Duration::from_millis(0)
     }
 }
 
-impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE> {
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> sqlite_vfs::DatabaseHandle
+    for Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
     type WalIndex = sqlite_vfs::WalDisabled;
 
     fn size(&self) -> Result<u64, io::Error> {
@@ -191,9 +177,14 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
 
         let current_page_count = self.page_count();
         if page_count > 0 && page_count < current_page_count {
-            for i in (page_count..current_page_count).into_iter().rev() {
-                self.del_page(i as u32);
-            }
+            // NOTE (sander): The example VFS removed pages in the following way:
+            //   for i in (page_count..current_page_count).into_iter().rev() {
+            //       self.del_page(i as u32);
+            //   }
+            // Because, AFAICT, pages are never removed from the middle of the database,
+            // we may as well remove them all at once from the end. This saves
+            // multiple roundtrips to the blockstore.
+            self.del_last_pages(page_count as u32);
         }
 
         Ok(())
@@ -201,7 +192,7 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
 
     fn lock(&mut self, lock: LockKind) -> Result<bool, io::Error> {
         let ok = Self::lock(self, lock);
-        // eprintln!("locked = {}", ok);
+        eprintln!("locked = {}", ok);
         Ok(ok)
     }
 
@@ -228,23 +219,55 @@ impl<const PAGE_SIZE: usize> sqlite_vfs::DatabaseHandle for Connection<PAGE_SIZE
     }
 }
 
-impl<const PAGE_SIZE: usize> Connection<PAGE_SIZE> {
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
     fn get_page(&self, ix: u32) -> [u8; PAGE_SIZE] {
+        let st: State = self.rt.state().unwrap();
+
+        // Fetch page
+        let page: Vec<u8> = self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
+
+        // Return a copy
         let mut data = [0u8; PAGE_SIZE];
-        self.storage.get_page(ix, data.as_mut_ptr());
+        data.copy_from_slice(&page);
         data
     }
 
     fn put_page(&self, ix: u32, data: &[u8; PAGE_SIZE]) {
-        self.storage.put_page(ix, data.as_ptr());
+        let mut st: State = self.rt.state().unwrap();
+        println!("state is {:?}", st.db);
+
+        // Add the new page to the blockstore
+        let page = self.rt.store().put_cbor(&data.to_vec(), Code::Blake2b256).unwrap();
+
+        // Add or replace in page state
+        if ix as usize == st.db.pages.len() {
+            st.db.pages.push(page);
+        } else {
+            st.db.pages[ix as usize] = page;
+        }
+
+        // Save new state
+        let new_root = self.rt.store().put_cbor(&st, Code::Blake2b256).unwrap();
+        self.rt.set_state_root(&new_root).unwrap();
     }
 
-    fn del_page(&self, ix: u32) {
-        self.storage.del_page(ix);
+    fn del_last_pages(&self, retain: u32) {
+        let mut st: State = self.rt.state().unwrap();
+
+        // Retain some pages
+        st.db.pages = st.db.pages[..(retain as usize) * PAGE_SIZE].to_vec();
+
+        // Save new state
+        let new_root = self.rt.store().put_cbor(&st, Code::Blake2b256).unwrap();
+        self.rt.set_state_root(&new_root).unwrap();
     }
 
     fn page_count(&self) -> usize {
-        self.storage.page_count() as usize
+        let st: State = self.rt.state().unwrap();
+        st.db.pages.len()
     }
 
     fn lock(&mut self, to: LockKind) -> bool {
@@ -335,7 +358,10 @@ impl<const PAGE_SIZE: usize> Connection<PAGE_SIZE> {
     }
 }
 
-impl<const PAGE_SIZE: usize> Drop for Connection<PAGE_SIZE> {
+impl<'r, const PAGE_SIZE: usize, RT: Runtime> Drop for Connection<'r, PAGE_SIZE, RT>
+where
+    RT::Blockstore: Clone,
+{
     fn drop(&mut self) {
         if self.lock != LockKind::None {
             self.lock(LockKind::None);
