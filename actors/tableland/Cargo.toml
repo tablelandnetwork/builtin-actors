@@ -35,6 +35,8 @@ bytes = "1.4.0"
 rusqlite = { path = "../../../../trevyn/rusqlite", features = ["bundled"] }
 sqlite-vfs = { path = "../../../../rkusa/sqlite-vfs" }
 getrandom = { version = "0.2.10", features = ["custom"] }
+serde_with = "3.0.0"
+serde_json = "1.0.97"
 
 [dev-dependencies]
 fil_actors_runtime = { path = "../../runtime", features = ["test_utils"] }

@@ -1,4 +1,4 @@
-use crate::State;
+use crate::state::State;
 use fil_actors_runtime::runtime::{DomainSeparationTag, Runtime};
 use fvm_ipld_encoding::CborStore;
 use multihash::Code;
@@ -182,7 +182,7 @@ where
 
     fn lock(&mut self, lock: LockKind) -> Result<bool, io::Error> {
         let ok = Self::lock(self, lock);
-        eprintln!("locked = {}", ok);
+        eprintln!("locked={}", ok);
         Ok(ok)
     }
 
@@ -215,7 +215,7 @@ where
 {
     fn get_page(&self, ix: u32) -> [u8; PAGE_SIZE] {
         let st: State = self.rt.state().unwrap();
-        eprintln!("get_page; current state: {:?}", st.db);
+        eprintln!("get_page; pages={}", st.db.pages.len());
 
         // Fetch page
         let page: Vec<u8> = self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
@@ -228,7 +228,7 @@ where
 
     fn put_page(&self, ix: u32, data: &[u8; PAGE_SIZE]) {
         let mut st: State = self.rt.state().unwrap();
-        eprintln!("put_page; current state: {:?}", st.db);
+        eprintln!("put_page; pages={}", st.db.pages.len());
 
         // Add the new page to the blockstore
         let page = self.rt.store().put_cbor(&data.to_vec(), Code::Blake2b256).unwrap();
@@ -247,7 +247,7 @@ where
 
     fn del_last_pages(&self, retain: u32) {
         let mut st: State = self.rt.state().unwrap();
-        eprintln!("del_last_pages; current state: {:?}", st.db);
+        eprintln!("del_last_pages; pages={}", st.db.pages.len());
 
         // Retain some pages
         st.db.pages = st.db.pages[..(retain as usize) * PAGE_SIZE].to_vec();
@@ -259,7 +259,7 @@ where
 
     fn page_count(&self) -> usize {
         let st: State = self.rt.state().unwrap();
-        eprintln!("page_count; current state: {:?}", st.db);
+        eprintln!("page_count; pages={}", st.db.pages.len());
 
         st.db.pages.len()
     }

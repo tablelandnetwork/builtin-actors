@@ -11,7 +11,7 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn new(store: &impl Blockstore, data: Vec<u8>, page_size: usize) -> Self {
+    pub fn new(store: &impl Blockstore, data: &[u8], page_size: usize) -> Self {
         let len = data.len();
         let mut page_count = len / page_size;
         if len % page_size > 0 {

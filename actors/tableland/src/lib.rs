@@ -1,8 +1,9 @@
-mod state;
+pub mod state;
 pub mod types;
 mod vfs;
 
-pub use self::state::{State, DB};
+use crate::state::{State, DB};
+use crate::types::QueryParams;
 use fil_actors_runtime::builtin::singletons::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{actor_dispatch, FIRST_EXPORTED_METHOD_NUMBER};
@@ -12,7 +13,7 @@ use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 use getrandom::register_custom_getrandom;
 use getrandom::Error;
 use num_derive::FromPrimitive;
-use rusqlite::{Connection, OpenFlags, Result};
+use rusqlite::{types::Value, Connection, OpenFlags};
 use sqlite_vfs::register;
 use types::{ConstructorParams, QueryReturn};
 
@@ -40,12 +41,6 @@ pub enum Method {
     Query = 2,
 }
 
-#[derive(Debug)]
-struct Person {
-    id: i32,
-    name: String,
-}
-
 /// Tableland Actor
 pub struct Actor;
 
@@ -53,63 +48,33 @@ impl Actor {
     pub fn constructor(rt: &impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&SYSTEM_ACTOR_ADDR))?;
 
-        let db = DB::new(rt.store(), params.db, SQLITE_PAGE_SIZE);
+        let db = DB::new(rt.store(), params.db.as_slice(), SQLITE_PAGE_SIZE);
         rt.create(&State { db })?;
         Ok(())
     }
 
-    pub fn query<RT>(rt: &RT) -> Result<QueryReturn, ActorError>
+    pub fn query<RT>(rt: &RT, params: QueryParams) -> Result<QueryReturn, ActorError>
     where
         RT: Runtime,
         RT::Blockstore: Clone,
     {
         rt.validate_immediate_caller_accept_any()?;
+        let conn = new_connection(rt)?;
 
-        let st: State = rt.state().unwrap();
-        let is_new = st.db.pages.len() == 0;
-
-        register("vfs", vfs::PagesVfs::<4096, RT>::new(rt), true).expect("register vfs");
-        let conn = Connection::open_with_flags_and_vfs(
-            "main.db",
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-            "vfs",
-        )
-        .expect("open connection");
-
-        if is_new {
-            conn.execute("PRAGMA page_size = 4096;", []).expect("set page_size = 4096");
-        }
-
-        let journal_mode: String = conn
-            .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
-            .expect("set journal_mode = MEMORY");
-        assert_eq!(journal_mode, "memory");
-
-        match conn.execute("CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT NOT NULL)", []) {
-            Ok(s) => println!("created table of size {}", s),
-            Err(e) => {
-                return Err(ActorError::unspecified(format!(
-                    "error creating table {}",
-                    e.to_string()
-                )))
+        let mut stmt = conn.prepare(params.stmt.as_str()).unwrap();
+        let cols: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+        let num_cols = cols.len();
+        let mut res: Vec<Vec<Value>> = vec![];
+        let mut rows = stmt.query([]).unwrap();
+        while let Some(r) = rows.next().unwrap() {
+            let mut row: Vec<Value> = vec![Value::Null; num_cols];
+            for c in 0..num_cols {
+                row[c] = r.get::<_, Value>(c).unwrap();
             }
+            res.push(row);
         }
-        let me = Person { id: 0, name: "Steven".to_string() };
-        conn.execute("INSERT INTO person (name) VALUES (?1)", [&me.name]).unwrap();
 
-        let mut stmt = conn.prepare("SELECT id, name FROM person").unwrap();
-        // let mut stmt = conn.prepare("SELECT * from bar").unwrap();
-        let person_iter =
-            stmt.query_map([], |row| Ok(Person { id: row.get(0)?, name: row.get(1)? })).unwrap();
-
-        let mut foo: String = String::new();
-        for person in person_iter {
-            foo = person.unwrap().name;
-            break;
-        }
-        Ok(QueryReturn { ret: foo.as_bytes().to_vec() })
+        Ok(QueryReturn { cols, rows: res })
     }
 
     /// Fallback method for unimplemented method numbers.
@@ -139,4 +104,35 @@ impl ActorCode for Actor {
         Query => query,
         _ => fallback [raw],
     }
+}
+
+fn new_connection<RT>(rt: &RT) -> Result<Connection, ActorError>
+where
+    RT: Runtime,
+    RT::Blockstore: Clone,
+{
+    let st: State = rt.state().unwrap();
+    let is_new = st.db.pages.len() == 0;
+
+    register("vfs", vfs::PagesVfs::<SQLITE_PAGE_SIZE, RT>::new(rt), true).expect("register vfs");
+    let conn = Connection::open_with_flags_and_vfs(
+        "main.db",
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        "vfs",
+    )
+    .expect("open connection");
+
+    if is_new {
+        conn.execute(format!("PRAGMA page_size = {};", SQLITE_PAGE_SIZE).as_str(), [])
+            .expect(format!("set page_size = {}", SQLITE_PAGE_SIZE).as_str());
+    }
+
+    let journal_mode: String = conn
+        .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
+        .expect("set journal_mode = MEMORY");
+    assert_eq!(journal_mode, "memory");
+
+    Ok(conn)
 }
