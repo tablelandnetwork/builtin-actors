@@ -47,7 +47,7 @@ where
         if db != "main.db" {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
-                format!("unexpected database name `{db}`; expected `main.db3`"),
+                format!("unexpected database name `{db}`; expected `main.db`"),
             ));
         }
 
@@ -83,6 +83,7 @@ where
         // NOTE (sander): I'm trying to use one of the runtime randomness methods.
         // I pulled the rand_epoch and entropy from the evm actor's usage of
         // this method, but I don't know if it will actually work / lead to problems.
+        let epoch = self.rt.curr_epoch();
         let randomness = self
             .rt
             .get_randomness_from_beacon(
@@ -218,11 +219,12 @@ where
         eprintln!("get_page; pages={}", st.db.pages.len());
 
         // Fetch page
-        let page: Vec<u8> = self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
-
-        // Return a copy
         let mut data = [0u8; PAGE_SIZE];
-        data.copy_from_slice(&page);
+        if (ix as usize) < st.db.pages.len() {
+            let page: Vec<u8> =
+                self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
+            data.copy_from_slice(&page);
+        }
         data
     }
 

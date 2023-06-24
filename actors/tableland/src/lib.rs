@@ -3,7 +3,7 @@ pub mod types;
 mod vfs;
 
 use crate::state::{State, DB};
-use crate::types::QueryParams;
+use crate::types::{ExecuteParams, ExecuteReturn, QueryParams};
 use fil_actors_runtime::builtin::singletons::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{actor_dispatch, FIRST_EXPORTED_METHOD_NUMBER};
@@ -38,7 +38,8 @@ const SQLITE_PAGE_SIZE: usize = 4096;
 #[repr(u64)]
 pub enum Method {
     Constructor = METHOD_CONSTRUCTOR,
-    Query = 2,
+    Execute = 2,
+    Query = 3,
 }
 
 /// Tableland Actor
@@ -53,6 +54,26 @@ impl Actor {
         Ok(())
     }
 
+    pub fn execute<RT>(rt: &RT, params: ExecuteParams) -> Result<ExecuteReturn, ActorError>
+    where
+        RT: Runtime,
+        RT::Blockstore: Clone,
+    {
+        rt.validate_immediate_caller_accept_any()?;
+        let mut conn = new_connection(rt)?;
+
+        let tx = conn.transaction().map_err(|e| ActorError::illegal_state(e.to_string()))?;
+        let mut effected_rows: usize = 0;
+        for stmt in params.stmts {
+            effected_rows += tx
+                .execute(stmt.as_str(), [])
+                .map_err(|e| ActorError::illegal_state(e.to_string()))?;
+        }
+        tx.commit().map_err(|e| ActorError::illegal_state(e.to_string()))?;
+
+        Ok(ExecuteReturn { effected_rows })
+    }
+
     pub fn query<RT>(rt: &RT, params: QueryParams) -> Result<QueryReturn, ActorError>
     where
         RT: Runtime,
@@ -61,15 +82,18 @@ impl Actor {
         rt.validate_immediate_caller_accept_any()?;
         let conn = new_connection(rt)?;
 
-        let mut stmt = conn.prepare(params.stmt.as_str()).unwrap();
+        let mut stmt = conn
+            .prepare(params.stmt.as_str())
+            .map_err(|e| ActorError::illegal_state(e.to_string()))?;
         let cols: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
         let num_cols = cols.len();
         let mut res: Vec<Vec<Value>> = vec![];
-        let mut rows = stmt.query([]).unwrap();
-        while let Some(r) = rows.next().unwrap() {
+        let mut rows = stmt.query([]).map_err(|e| ActorError::illegal_state(e.to_string()))?;
+        while let Some(r) = rows.next().map_err(|e| ActorError::illegal_state(e.to_string()))? {
             let mut row: Vec<Value> = vec![Value::Null; num_cols];
             for c in 0..num_cols {
-                row[c] = r.get::<_, Value>(c).unwrap();
+                row[c] =
+                    r.get::<_, Value>(c).map_err(|e| ActorError::illegal_state(e.to_string()))?;
             }
             res.push(row);
         }
@@ -101,6 +125,7 @@ impl ActorCode for Actor {
 
     actor_dispatch! {
         Constructor => constructor,
+        Execute => execute,
         Query => query,
         _ => fallback [raw],
     }
@@ -111,10 +136,11 @@ where
     RT: Runtime,
     RT::Blockstore: Clone,
 {
-    let st: State = rt.state().unwrap();
+    let st: State = rt.state().map_err(|e| ActorError::illegal_state(e.to_string()))?;
     let is_new = st.db.pages.len() == 0;
 
-    register("vfs", vfs::PagesVfs::<SQLITE_PAGE_SIZE, RT>::new(rt), true).expect("register vfs");
+    register("vfs", vfs::PagesVfs::<SQLITE_PAGE_SIZE, RT>::new(rt), true)
+        .map_err(|e| ActorError::illegal_state(e.to_string()))?;
     let conn = Connection::open_with_flags_and_vfs(
         "main.db",
         OpenFlags::SQLITE_OPEN_READ_WRITE
@@ -122,17 +148,27 @@ where
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         "vfs",
     )
-    .expect("open connection");
+    .map_err(|e| ActorError::illegal_state(e.to_string()))?;
 
     if is_new {
         conn.execute(format!("PRAGMA page_size = {};", SQLITE_PAGE_SIZE).as_str(), [])
-            .expect(format!("set page_size = {}", SQLITE_PAGE_SIZE).as_str());
+            .map_err(|e| ActorError::illegal_state(e.to_string()))?;
+    }
+    let page_size: usize = conn
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .map_err(|e| ActorError::illegal_state(e.to_string()))?;
+    if page_size != SQLITE_PAGE_SIZE {
+        return Err(ActorError::illegal_state(
+            format!("db must use page_size = {}", SQLITE_PAGE_SIZE).to_string(),
+        ));
     }
 
     let journal_mode: String = conn
         .query_row("PRAGMA journal_mode = MEMORY", [], |row| row.get(0))
-        .expect("set journal_mode = MEMORY");
-    assert_eq!(journal_mode, "memory");
+        .map_err(|e| ActorError::illegal_state(e.to_string()))?;
+    if journal_mode != "memory" {
+        return Err(ActorError::illegal_state("db must use journal_mode = MEMORY".to_string()));
+    }
 
     Ok(conn)
 }

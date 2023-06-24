@@ -13,6 +13,18 @@ pub struct ConstructorParams {
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(transparent)]
+pub struct ExecuteParams {
+    pub stmts: Vec<String>,
+}
+
+#[derive(Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(transparent)]
+pub struct ExecuteReturn {
+    pub effected_rows: usize,
+}
+
+#[derive(Debug, Serialize_tuple, Deserialize_tuple)]
+#[serde(transparent)]
 pub struct QueryParams {
     pub stmt: String,
 }
