@@ -1,22 +1,18 @@
-mod errors;
-pub mod state;
-pub mod types;
 mod vfs;
 
-use crate::errors::Error;
-use crate::state::{State, DB};
-use crate::types::{ExecuteParams, ExecuteReturn, QueryParams};
+use fil_actor_tableland_interface::{
+    ConstructorParams, Error, ExecuteParams, ExecuteReturn, Method, QueryParams, QueryReturn,
+    State, DB, SQLITE_PAGE_SIZE,
+};
 use fil_actors_runtime::builtin::singletons::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{actor_dispatch, FIRST_EXPORTED_METHOD_NUMBER};
 use fil_actors_runtime::{actor_error, ActorError};
 use fvm_ipld_encoding::ipld_block::IpldBlock;
-use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+use fvm_shared::MethodNum;
 use getrandom::register_custom_getrandom;
-use num_derive::FromPrimitive;
 use rusqlite::{types::Value, Connection, OpenFlags};
 use sqlite_vfs::register;
-use types::{ConstructorParams, QueryReturn};
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -31,17 +27,6 @@ pub fn randomness(buf: &mut [u8]) -> Result<(), getrandom::Error> {
     Ok(())
 }
 register_custom_getrandom!(randomness);
-
-const SQLITE_PAGE_SIZE: usize = 4096;
-
-/// Tableland actor methods available
-#[derive(FromPrimitive)]
-#[repr(u64)]
-pub enum Method {
-    Constructor = METHOD_CONSTRUCTOR,
-    Execute = 2,
-    Query = 3,
-}
 
 /// Tableland Actor
 pub struct Actor;

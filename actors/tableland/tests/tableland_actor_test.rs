@@ -1,8 +1,7 @@
-use fil_actor_tableland::state::State;
-use fil_actor_tableland::types::{
-    ConstructorParams, ExecuteParams, ExecuteReturn, QueryParams, QueryReturn,
+use fil_actor_tableland::Actor as TablelandActor;
+use fil_actor_tableland_interface::{
+    ConstructorParams, ExecuteParams, ExecuteReturn, Method, QueryParams, QueryReturn, State,
 };
-use fil_actor_tableland::{Actor as TablelandActor, Method};
 use fil_actors_runtime::builtin::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::test_utils::*;
 use fvm_ipld_encoding::ipld_block::IpldBlock;

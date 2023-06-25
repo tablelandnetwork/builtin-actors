@@ -1,6 +1,6 @@
 [package]
-name = "fil_actor_tableland"
-description = "Tableland actor for a Filecoin Subnet"
+name = "fil_actor_tableland_interface"
+description = "Tableland actor interface for a Filecoin Subnet"
 version = "11.0.0"
 license = "MIT OR Apache-2.0"
 authors = ["Tableland"]
@@ -15,22 +15,16 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 cid = "0.8.6"
-fil_actors_runtime = { version = "11.0.0", path = "../../runtime" }
-fil_actor_tableland_interface = { version = "11.0.0", path = "interface" }
+fil_actors_runtime = { version = "11.0.0", path = "../../../runtime" }
 fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.3"
 fvm_shared = { version = "3.2.0", default-features = false }
-getrandom = { version = "0.2.10", features = ["custom"] }
 multihash = { version = "0.16.3", default-features = false }
+num-derive = "0.3.3"
 num-traits = "0.2.15"
 rusqlite = { git = "https://github.com/sanderpick/rusqlite.git", branch = "wasm32-unknown-unknown", features = ["bundled", "load_extension"] }
+serde = { version = "1.0.136", features = ["derive"] }
+serde_tuple = "0.5"
+serde_with = "3.0.0"
 sqlite-vfs = { git = "https://github.com/sanderpick/sqlite-vfs.git", branch = "wasm32-unknown-unknown" }
-
-[dev-dependencies]
-fil_actors_runtime = { path = "../../runtime", features = ["test_utils"] }
-serde_ipld_dagcbor = "0.3.0"
-serde_json = "1.0.97"
-serial_test = "2.0.0"
-
-[features]
-fil-actor = ["fil_actors_runtime/fil-actor"]
+thiserror = "1.0.40"

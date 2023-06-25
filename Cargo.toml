@@ -54,6 +54,7 @@ testing-fake-proofs = []
 resolver = "2"
 members = [
      "actors/*",
+     "actors/tableland/interface",
      "state",
      "runtime",
      "test_vm",

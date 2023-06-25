@@ -1,4 +1,4 @@
-use crate::state::State;
+use fil_actor_tableland_interface::State;
 use fil_actors_runtime::runtime::{DomainSeparationTag, Runtime};
 use fvm_ipld_encoding::CborStore;
 use multihash::Code;

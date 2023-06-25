@@ -1,8 +1,20 @@
 use fvm_ipld_encoding::strict_bytes;
 use fvm_ipld_encoding::tuple::*;
+use fvm_shared::METHOD_CONSTRUCTOR;
+use num_derive::FromPrimitive;
 use rusqlite::types::Value;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{serde_as, DeserializeAs, SerializeAs};
+
+pub const SQLITE_PAGE_SIZE: usize = 4096;
+
+#[derive(FromPrimitive)]
+#[repr(u64)]
+pub enum Method {
+    Constructor = METHOD_CONSTRUCTOR,
+    Execute = 2,
+    Query = 3,
+}
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(transparent)]
