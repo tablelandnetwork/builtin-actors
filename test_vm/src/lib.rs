@@ -17,6 +17,9 @@ use fil_actor_paych::Actor as PaychActor;
 use fil_actor_power::{Actor as PowerActor, Method as MethodPower, State as PowerState};
 use fil_actor_reward::{Actor as RewardActor, State as RewardState};
 use fil_actor_system::{Actor as SystemActor, State as SystemState};
+use fil_actor_tableland::{
+    state::State as TablelandState, state::DB as TablelandDB, Actor as TablelandActor,
+};
 use fil_actor_verifreg::{Actor as VerifregActor, State as VerifRegState};
 use fil_actors_runtime::cbor::serialize;
 use fil_actors_runtime::runtime::builtins::Type;
@@ -29,7 +32,7 @@ use fil_actors_runtime::{actor_error, SendError};
 use fil_actors_runtime::{
     ActorError, BURNT_FUNDS_ACTOR_ADDR, CRON_ACTOR_ADDR, EAM_ACTOR_ADDR, FIRST_NON_SINGLETON_ADDR,
     INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR, STORAGE_MARKET_ACTOR_ADDR, STORAGE_POWER_ACTOR_ADDR,
-    SYSTEM_ACTOR_ADDR, VERIFIED_REGISTRY_ACTOR_ADDR,
+    SYSTEM_ACTOR_ADDR, TABLELAND_ACTOR_ADDR, VERIFIED_REGISTRY_ACTOR_ADDR,
 };
 use fil_actors_runtime::{MessageAccumulator, DATACAP_TOKEN_ACTOR_ADDR};
 use fil_builtin_actors_state::check::check_state_invariants;
@@ -397,6 +400,13 @@ where
         v.set_actor(
             &EAM_ACTOR_ADDR,
             actor(*EAM_ACTOR_CODE_ID, EMPTY_ARR_CID, 0, TokenAmount::zero(), None),
+        );
+
+        // Tableland
+        let tableland_head = v.put_store(&TablelandState { db: TablelandDB { pages: vec![] } });
+        v.set_actor(
+            &TABLELAND_ACTOR_ADDR,
+            actor(*TABLELAND_ACTOR_CODE_ID, tableland_head, 0, TokenAmount::zero(), None),
         );
 
         // datacap
@@ -901,6 +911,7 @@ where
             Type::EVM => EvmContractActor::invoke_method(self, self.msg.method, params),
             Type::EAM => EamActor::invoke_method(self, self.msg.method, params),
             Type::EthAccount => EthAccountActor::invoke_method(self, self.msg.method, params),
+            Type::Tableland => TablelandActor::invoke_method(self, self.msg.method, params),
         };
         if res.is_ok() && !*self.caller_validated.borrow() {
             res = Err(actor_error!(assertion_failed, "failed to validate caller"));

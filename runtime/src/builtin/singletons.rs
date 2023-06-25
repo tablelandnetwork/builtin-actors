@@ -26,7 +26,7 @@ define_singletons! {
     VERIFIED_REGISTRY_ACTOR = 6,
     DATACAP_TOKEN_ACTOR = 7,
     EAM_ACTOR = 10,
-    QUERY_ACTOR = 17,
+    TABLELAND_ACTOR = 17,
     BURNT_FUNDS_ACTOR = 99,
 }
 

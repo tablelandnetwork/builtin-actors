@@ -28,6 +28,7 @@ fil_actor_datacap = { version = "11.0.0", path = "../actors/datacap" }
 fil_actor_evm = { version = "11.0.0", path = "../actors/evm" }
 fil_actor_eam = { version = "11.0.0", path = "../actors/eam" }
 fil_actor_ethaccount = { version = "11.0.0", path = "../actors/ethaccount" }
+fil_actor_tableland = { version = "11.0.0", path = "../actors/tableland" }
 
 anyhow = "1.0.65"
 bimap = { version = "0.6.2" }
