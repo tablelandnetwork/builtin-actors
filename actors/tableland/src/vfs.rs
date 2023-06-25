@@ -83,7 +83,6 @@ where
         // NOTE (sander): I'm trying to use one of the runtime randomness methods.
         // I pulled the rand_epoch and entropy from the evm actor's usage of
         // this method, but I don't know if it will actually work / lead to problems.
-        let epoch = self.rt.curr_epoch();
         let randomness = self
             .rt
             .get_randomness_from_beacon(

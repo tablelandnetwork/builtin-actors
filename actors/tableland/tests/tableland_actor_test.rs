@@ -10,6 +10,7 @@ use fvm_shared::address::Address;
 use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
 use serde_ipld_dagcbor::from_slice;
+use serial_test::serial;
 
 struct TestDB {
     data: &'static [u8],
@@ -22,6 +23,7 @@ static EMPTY_DB: TestDB = TestDB { data: &[], num_pages: 0 };
 //     TestDB { data: include_bytes!("../testdata/tahoe.mbtiles"), num_pages: 224 };
 
 #[test]
+#[serial]
 fn construction() {
     fn construct(db: &TestDB, exit_code: ExitCode) {
         let rt = MockRuntime { receiver: Address::new_id(100), ..Default::default() };
@@ -53,6 +55,7 @@ fn construction() {
 }
 
 #[test]
+#[serial]
 fn execution() {
     fn execute(
         db: &TestDB,
@@ -73,6 +76,14 @@ fn execution() {
         rt.verify();
 
         rt.expect_validate_caller_any();
+        // NOTE (sander): This is a hack. Try expecting randomness to be called
+        // for all tests and you'll see that, for some reason probably related to
+        // me removing the Sync requirement on the VFS, the tests share some aspect
+        // of the underlying SQLite connection, even though each test has its own
+        // VFS instance. TL;DR, the journal header is written only once during the
+        // first test run, which calls the random method on VFS. This is also the
+        // reason why all tests are run serial.
+        // I'm not 100% sure, but this shouldn't be an issue when compiling to WASM.
         if first_run {
             let epoch = 1234;
             rt.set_epoch(epoch);
@@ -135,6 +146,7 @@ fn execution() {
 }
 
 #[test]
+#[serial]
 fn queries() {
     fn query(db: &TestDB, stmt: &str, exit_code: ExitCode, col_count: usize, row_count: usize) {
         let rt = MockRuntime { receiver: Address::new_id(100), ..Default::default() };

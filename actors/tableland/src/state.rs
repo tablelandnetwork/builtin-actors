@@ -1,3 +1,4 @@
+use crate::errors::Error;
 use cid::Cid;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::tuple::*;
@@ -11,7 +12,7 @@ pub struct DB {
 }
 
 impl DB {
-    pub fn new(store: &impl Blockstore, data: &[u8], page_size: usize) -> Self {
+    pub fn new(store: &impl Blockstore, data: &[u8], page_size: usize) -> Result<Self, Error> {
         let len = data.len();
         let mut page_count = len / page_size;
         if len % page_size > 0 {
@@ -25,10 +26,11 @@ impl DB {
                 end = len;
             }
             let page = &data[p * page_size..end];
-            pages[p] = store.put_cbor(&page, Code::Blake2b256).unwrap();
+            pages[p] =
+                store.put_cbor(&page, Code::Blake2b256).map_err(|e| Error::from(e.to_string()))?;
         }
 
-        DB { pages }
+        Ok(DB { pages })
     }
 }
 
