@@ -61,7 +61,7 @@ fn execution() {
         stmts: Vec<&str>,
         exit_code: ExitCode,
         effected_rows: usize,
-        first_run: bool,
+        need_beacon_randomness: bool,
     ) {
         let rt = MockRuntime { receiver: Address::new_id(100), ..Default::default() };
 
@@ -83,7 +83,7 @@ fn execution() {
         // first test run, which calls the random method on VFS. This is also the
         // reason why all tests are run serial.
         // I'm not 100% sure, but this shouldn't be an issue when compiling to WASM.
-        if first_run {
+        if need_beacon_randomness {
             let epoch = 1234;
             rt.set_epoch(epoch);
             rt.expect_get_randomness_from_beacon(
@@ -120,7 +120,7 @@ fn execution() {
         ],
         ExitCode::OK,
         2,
-        true,
+        false,
     );
     // Create and insert on empty db
     execute(

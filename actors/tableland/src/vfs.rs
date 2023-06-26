@@ -1,5 +1,5 @@
 use fil_actor_tableland_interface::State;
-use fil_actors_runtime::runtime::{DomainSeparationTag, Runtime};
+use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_encoding::CborStore;
 use multihash::Code;
 use sqlite_vfs::{LockKind, OpenKind, OpenOptions, Vfs};
@@ -83,16 +83,21 @@ where
         // NOTE (sander): I'm trying to use one of the runtime randomness methods.
         // I pulled the rand_epoch and entropy from the evm actor's usage of
         // this method, but I don't know if it will actually work / lead to problems.
-        let randomness = self
-            .rt
-            .get_randomness_from_beacon(
-                DomainSeparationTag::EvmPrevRandao,
-                self.rt.curr_epoch(),
-                b"prevrandao",
-            )
-            .unwrap()
-            .map(|x| x as i8);
-        buffer[..randomness.len()].copy_from_slice(&randomness);
+        // let randomness = self
+        //     .rt
+        //     .get_randomness_from_beacon(
+        //         DomainSeparationTag::EvmPrevRandao,
+        //         self.rt.curr_epoch(),
+        //         b"prevrandao",
+        //     )
+        //     .unwrap()
+        //     .map(|x| x as i8);
+        // buffer[..randomness.len()].copy_from_slice(&randomness);
+
+        // NOTE (sander): The above panic in Fendermint w/o a good error. For now,
+        // just return zeros.
+        let data = (0..buffer.len()).map(|_| ((0 as u128) % 256) as i8).collect::<Vec<_>>();
+        buffer.copy_from_slice(&data);
     }
 
     fn sleep(&self, _duration: Duration) -> Duration {
