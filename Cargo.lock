@@ -4795,6 +4795,7 @@ dependencies = [
  "fil_actor_reward",
  "fil_actor_system",
  "fil_actor_tableland",
+ "fil_actor_tableland_interface",
  "fil_actor_verifreg",
  "fil_actors_evm_shared",
  "fil_actors_runtime",

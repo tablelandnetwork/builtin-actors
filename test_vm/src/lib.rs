@@ -13,13 +13,12 @@ use fil_actor_init::{Actor as InitActor, ExecReturn, State as InitState};
 use fil_actor_market::{Actor as MarketActor, Method as MarketMethod, State as MarketState};
 use fil_actor_miner::{Actor as MinerActor, MinerInfo, State as MinerState};
 use fil_actor_multisig::Actor as MultisigActor;
-use fil_actor_paych::Actor as PaychActor;
+use fil_actor_paych::Actor as PaychActor;:
 use fil_actor_power::{Actor as PowerActor, Method as MethodPower, State as PowerState};
 use fil_actor_reward::{Actor as RewardActor, State as RewardState};
 use fil_actor_system::{Actor as SystemActor, State as SystemState};
-use fil_actor_tableland::{
-    state::State as TablelandState, state::DB as TablelandDB, Actor as TablelandActor,
-};
+use fil_actor_tableland::Actor as TablelandActor;
+use fil_actor_tableland_interface::{State as TablelandState, DB as TablelandDB};
 use fil_actor_verifreg::{Actor as VerifregActor, State as VerifRegState};
 use fil_actors_runtime::cbor::serialize;
 use fil_actors_runtime::runtime::builtins::Type;
