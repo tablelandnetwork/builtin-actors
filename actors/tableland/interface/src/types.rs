@@ -17,10 +17,10 @@ pub enum Method {
 }
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]
-#[serde(transparent)]
 pub struct ConstructorParams {
     #[serde(with = "strict_bytes")]
     pub db: Vec<u8>,
+    pub buck_size: usize,
 }
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]

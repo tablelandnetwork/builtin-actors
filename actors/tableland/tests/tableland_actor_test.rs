@@ -13,13 +13,26 @@ use serial_test::serial;
 
 struct TestDB {
     data: &'static [u8],
-    num_pages: usize,
+    page_count: usize,
+    tree_height: usize,
+    tree_length: usize,
 }
 
-static DB: TestDB = TestDB { data: include_bytes!("../testdata/test.db"), num_pages: 224 };
-static EMPTY_DB: TestDB = TestDB { data: &[], num_pages: 0 };
-// static TILE_DB: TestDB =
-//     TestDB { data: include_bytes!("../testdata/tahoe.mbtiles"), num_pages: 224 };
+static DB: TestDB = TestDB {
+    data: include_bytes!("../testdata/test.db"),
+    page_count: 224,
+    tree_height: 0,
+    tree_length: 224,
+};
+static TILE_DB: TestDB = TestDB {
+    data: include_bytes!("../testdata/tahoe.mbtiles"),
+    page_count: 18581,
+    tree_height: 1,
+    tree_length: 73,
+};
+static EMPTY_DB: TestDB = TestDB { data: &[], page_count: 0, tree_height: 0, tree_length: 0 };
+
+const BUCKET_SIZE: usize = 256; // IPLD block limit w/ standard page size of 4096
 
 #[test]
 #[serial]
@@ -30,14 +43,20 @@ fn construction() {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
 
-        let params =
-            IpldBlock::serialize_dag_cbor(&ConstructorParams { db: db.data.to_vec() }).unwrap();
+        let params = IpldBlock::serialize_dag_cbor(&ConstructorParams {
+            db: db.data.to_vec(),
+            buck_size: BUCKET_SIZE,
+        })
+        .unwrap();
 
         if exit_code.is_success() {
             rt.call::<TablelandActor>(Method::Constructor as MethodNum, params)
                 .expect("construction");
+            let st = rt.get_state::<State>();
 
-            assert_eq!(rt.get_state::<State>().db.pages.len(), db.num_pages);
+            assert_eq!(st.db.page_count, db.page_count);
+            assert_eq!(st.db.tree_height, db.tree_height);
+            assert_eq!(st.db.page_tree.len(), db.tree_length);
         } else {
             expect_abort(
                 exit_code,
@@ -47,8 +66,9 @@ fn construction() {
         rt.verify();
     }
 
-    // Create runtime from existing db
+    // Create runtime from existing dbs
     construct(&DB, ExitCode::OK);
+    construct(&TILE_DB, ExitCode::OK);
     // Create runtime with empty db
     construct(&EMPTY_DB, ExitCode::OK);
 }
@@ -69,7 +89,11 @@ fn execution() {
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
         rt.call::<TablelandActor>(
             Method::Constructor as MethodNum,
-            IpldBlock::serialize_dag_cbor(&ConstructorParams { db: db.data.to_vec() }).unwrap(),
+            IpldBlock::serialize_dag_cbor(&ConstructorParams {
+                db: db.data.to_vec(),
+                buck_size: BUCKET_SIZE,
+            })
+            .unwrap(),
         )
         .expect("construction");
         rt.verify();
@@ -154,7 +178,11 @@ fn queries() {
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
         rt.call::<TablelandActor>(
             Method::Constructor as MethodNum,
-            IpldBlock::serialize_dag_cbor(&ConstructorParams { db: db.data.to_vec() }).unwrap(),
+            IpldBlock::serialize_dag_cbor(&ConstructorParams {
+                db: db.data.to_vec(),
+                buck_size: BUCKET_SIZE,
+            })
+            .unwrap(),
         )
         .expect("construction");
         rt.verify();
@@ -164,8 +192,8 @@ fn queries() {
         let params = IpldBlock::serialize_cbor(&QueryParams { stmt: stmt.to_string() }).unwrap();
 
         if exit_code.is_success() {
-            let block: IpldBlock =
-                rt.call::<TablelandActor>(Method::Query as MethodNum, params).unwrap().unwrap();
+            let block = rt.call::<TablelandActor>(Method::Query as MethodNum, params);
+            let block = block.unwrap().unwrap();
             let ret = from_slice::<QueryReturn>(block.data.as_slice()).unwrap();
             assert_eq!(ret.cols.len(), col_count);
             assert_eq!(ret.rows.len(), row_count);

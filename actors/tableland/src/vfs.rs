@@ -70,7 +70,7 @@ where
 
     fn exists(&self, db: &str) -> Result<bool, io::Error> {
         let st: State = self.rt.state().unwrap();
-        Ok(db == "main.db" && st.db.pages.len() > 0)
+        Ok(db == "main.db" && st.db.page_count > 0)
     }
 
     fn temporary_name(&self) -> String {
@@ -220,13 +220,13 @@ where
 {
     fn get_page(&self, ix: u32) -> [u8; PAGE_SIZE] {
         let st: State = self.rt.state().unwrap();
-        eprintln!("get_page; pages={}", st.db.pages.len());
+        eprintln!("get_page; ix={}; pages={}", ix, st.db.page_count);
 
         // Fetch page
         let mut data = [0u8; PAGE_SIZE];
-        if (ix as usize) < st.db.pages.len() {
-            let page: Vec<u8> =
-                self.rt.store().get_cbor(&st.db.pages[ix as usize]).unwrap().unwrap();
+        if (ix as usize) < st.db.page_count {
+            let page: Vec<u8> = st.db.get_page(self.rt.store(), ix as usize).unwrap();
+            println!("{:?}", page);
             data.copy_from_slice(&page);
         }
         data
@@ -234,16 +234,16 @@ where
 
     fn put_page(&self, ix: u32, data: &[u8; PAGE_SIZE]) {
         let mut st: State = self.rt.state().unwrap();
-        eprintln!("put_page; pages={}", st.db.pages.len());
+        eprintln!("put_page; ix={}; pages={}", ix, st.db.page_count);
 
         // Add the new page to the blockstore
         let page = self.rt.store().put_cbor(&data.to_vec(), Code::Blake2b256).unwrap();
 
         // Add or replace in page state
-        if ix as usize == st.db.pages.len() {
-            st.db.pages.push(page);
+        if ix as usize == st.db.page_count {
+            st.db.page_tree.push(page);
         } else {
-            st.db.pages[ix as usize] = page;
+            st.db.page_tree[ix as usize] = page;
         }
 
         // Save new state
@@ -253,10 +253,10 @@ where
 
     fn del_last_pages(&self, retain: u32) {
         let mut st: State = self.rt.state().unwrap();
-        eprintln!("del_last_pages; pages={}", st.db.pages.len());
+        eprintln!("del_last_pages; retain={}; pages={}", retain, st.db.page_count);
 
         // Retain some pages
-        st.db.pages = st.db.pages[..(retain as usize) * PAGE_SIZE].to_vec();
+        st.db.page_tree = st.db.page_tree[..(retain as usize) * PAGE_SIZE].to_vec();
 
         // Save new state
         let new_root = self.rt.store().put_cbor(&st, Code::Blake2b256).unwrap();
@@ -265,9 +265,9 @@ where
 
     fn page_count(&self) -> usize {
         let st: State = self.rt.state().unwrap();
-        eprintln!("page_count; pages={}", st.db.pages.len());
+        eprintln!("page_count; pages={}", st.db.page_count);
 
-        st.db.pages.len()
+        st.db.page_count
     }
 
     fn lock(&mut self, to: LockKind) -> bool {

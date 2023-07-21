@@ -35,7 +35,7 @@ impl Actor {
     pub fn constructor(rt: &impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&SYSTEM_ACTOR_ADDR))?;
 
-        let db = DB::new(rt.store(), params.db.as_slice(), SQLITE_PAGE_SIZE)?;
+        let db = DB::new(rt.store(), params.db.as_slice(), SQLITE_PAGE_SIZE, params.buck_size)?;
         rt.create(&State { db })?;
         Ok(())
     }
@@ -120,7 +120,7 @@ where
     RT::Blockstore: Clone,
 {
     let st: State = rt.state()?;
-    let is_new = st.db.pages.len() == 0;
+    let is_new = st.db.page_tree.len() == 0;
 
     register("vfs", vfs::PagesVfs::<SQLITE_PAGE_SIZE, RT>::new(rt), true)
         .map_err(|e| Error::from(e))?;
