@@ -12,8 +12,9 @@ pub const SQLITE_PAGE_SIZE: usize = 4096;
 #[repr(u64)]
 pub enum Method {
     Constructor = METHOD_CONSTRUCTOR,
-    Execute = 2,
-    Query = 3,
+    // Method numbers derived from FRC-0042 standards
+    Execute = frc42_dispatch::method_hash!("Execute"),
+    Query = frc42_dispatch::method_hash!("Query"),
 }
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]
