@@ -23,6 +23,7 @@ use test_vm::{
 abigen!(Recursive, "../actors/evm/tests/contracts/Recursive.abi");
 abigen!(Factory, "../actors/evm/tests/contracts/Factory.abi");
 abigen!(FactoryChild, "../actors/evm/tests/contracts/FactoryChild.abi");
+abigen!(Tableland, "../actors/evm/tests/contracts/TablelandTest.abi");
 
 fn id_to_eth(id: ActorID) -> EthAddress {
     let mut addr = [0u8; 20];
@@ -34,6 +35,65 @@ fn id_to_eth(id: ActorID) -> EthAddress {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 struct ContractParams(#[serde(with = "strict_bytes")] pub Vec<u8>);
+
+#[test]
+fn test_evm_tableland() {
+    let store = MemoryBlockstore::new();
+    let v = TestVM::<MemoryBlockstore>::new_with_singletons(&store);
+
+    let account = create_accounts(&v, 1, &TokenAmount::from_whole(10_000))[0];
+
+    let address = id_to_eth(account.id().unwrap());
+    let (client, _mock) = Provider::mocked();
+
+    let contract = Tableland::new(address, Arc::new(client));
+
+    let bytecode =
+        hex::decode(include_str!("../../actors/evm/tests/contracts/TablelandTest.hex")).unwrap();
+
+    // deploy tableland test
+    let create_result = v
+        .apply_message(
+            &account,
+            &EAM_ACTOR_ADDR,
+            &TokenAmount::zero(),
+            fil_actor_eam::Method::CreateExternal as u64,
+            Some(fil_actor_eam::CreateExternalParams(bytecode)),
+        )
+        .unwrap();
+
+    assert!(
+        create_result.code.is_success(),
+        "failed to create the new actor {}",
+        create_result.message
+    );
+
+    let create_return: fil_actor_eam::CreateExternalReturn =
+        create_result.ret.unwrap().deserialize().expect("failed to decode results");
+
+    // call the tableland test (it will call the tableland actor via the EVM actor)
+    let contract_params = contract.ping().calldata().expect("should serialize");
+    let call_result = v
+        .apply_message(
+            &account,
+            &create_return.robust_address.unwrap(),
+            &TokenAmount::zero(),
+            fil_actor_evm::Method::InvokeContract as u64,
+            Some(ContractParams(contract_params.to_vec())),
+        )
+        .unwrap();
+
+    assert!(call_result.code.is_success(), "failed to call the new actor {}", call_result.message);
+
+    let BytesDe(return_value) =
+        call_result.ret.unwrap().deserialize().expect("failed to deserialize results");
+
+    let evm_ret: String = contract
+        .decode_output(&contract.ping().function.name, &return_value)
+        .expect("failed to decode return");
+
+    assert_eq!("Pong", evm_ret, "expected contract to return 0 on success");
+}
 
 #[test]
 fn test_evm_call() {

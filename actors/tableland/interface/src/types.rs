@@ -15,6 +15,7 @@ pub enum Method {
     // Method numbers derived from FRC-0042 standards
     Execute = frc42_dispatch::method_hash!("Execute"),
     Query = frc42_dispatch::method_hash!("Query"),
+    Ping = frc42_dispatch::method_hash!("Ping"),
 }
 
 #[derive(Debug, Serialize_tuple, Deserialize_tuple)]
@@ -76,4 +77,10 @@ impl<'de> DeserializeAs<'de, Value> for ValueDef {
     {
         ValueDef::deserialize(deserializer)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize_tuple, Deserialize_tuple)]
+#[serde(transparent)]
+pub struct PingReturn {
+    pub symbol: String,
 }

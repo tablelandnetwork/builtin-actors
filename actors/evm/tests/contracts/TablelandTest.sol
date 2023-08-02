@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.17;
 
-contract DataCapApiTest {
+contract TablelandTest {
     uint8 constant MajTextString = 3;
 
     function sliceUInt8(
@@ -103,14 +103,12 @@ contract DataCapApiTest {
         string memory response;
         uint byteIdx = 0;
 
-        // --- parsing CBOR header ---
         uint8 maj;
         uint len;
 
         (maj, len, byteIdx) = parseCborHeader(ret_val, byteIdx);
         require(maj == MajTextString, "invalid maj (expected MajTextString)");
 
-        // --
         uint max_len = byteIdx + len;
         bytes memory slice = new bytes(len);
         uint slice_index = 0;
@@ -125,22 +123,15 @@ contract DataCapApiTest {
         return response;
     }
 
-    function symbol() public returns (string memory) {
+    function ping() public returns (string memory) {
         // hardcode for testing
-        // 1.
         bytes memory raw_request = new bytes(0);
-        // 2.
+        // precompile address that will the call to Tableland actor
         address CALL_ACTOR_ID = 0xfe00000000000000000000000000000000000005;
-        // 3.
         uint256 value = 0;
-        // 4.
         uint256 method_num = 2481995435; // Tableland method Symbol (Ping hash)
-        // 5.
         bool static_call = true;
-        // 6.
         uint64 codec = 0x00; //Misc.NONE_CODEC
-        // 7.
-        // CommonTypes.FilActorId target = DataCapTypes.ActorID;
 
         (bool success, bytes memory data) = address(CALL_ACTOR_ID).delegatecall(
             abi.encode(
