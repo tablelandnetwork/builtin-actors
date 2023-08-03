@@ -2,7 +2,7 @@ mod vfs;
 
 use fil_actor_tableland_interface::{
     ConstructorParams, Error, ExecuteParams, ExecuteReturn, Method, QueryParams, QueryReturn,
-    State, DB, SQLITE_PAGE_SIZE,
+    State, DB, SQLITE_PAGE_SIZE, PingReturn
 };
 use fil_actors_runtime::builtin::singletons::SYSTEM_ACTOR_ADDR;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
@@ -84,6 +84,15 @@ impl Actor {
         Ok(QueryReturn { cols, rows: res })
     }
 
+    pub fn ping<RT>(rt: &RT) -> Result<PingReturn, ActorError>
+    where
+        RT: Runtime,
+        RT::Blockstore: Clone,
+    {
+        rt.validate_immediate_caller_accept_any()?;        
+        Ok(PingReturn { symbol: "Pong".to_string() })
+    }
+
     /// Fallback method for unimplemented method numbers.
     pub fn fallback(
         rt: &impl Runtime,
@@ -110,6 +119,7 @@ impl ActorCode for Actor {
         Constructor => constructor,
         Execute => execute,
         Query => query,
+        Ping => ping,
         _ => fallback [raw],
     }
 }

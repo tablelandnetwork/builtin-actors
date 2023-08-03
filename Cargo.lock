@@ -2167,6 +2167,7 @@ version = "11.0.0"
 dependencies = [
  "cid",
  "fil_actors_runtime",
+ "frc42_dispatch",
  "fvm_ipld_blockstore",
  "fvm_ipld_encoding",
  "fvm_shared",

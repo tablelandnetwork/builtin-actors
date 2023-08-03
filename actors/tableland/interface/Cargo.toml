@@ -14,6 +14,7 @@ keywords = ["filecoin", "web3", "wasm", "tableland", "sqlite"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+frc42_dispatch = "3.2.0"
 cid = "0.8.6"
 fil_actors_runtime = { version = "11.0.0", path = "../../../runtime" }
 fvm_ipld_blockstore = "0.1.2"
@@ -22,7 +23,10 @@ fvm_shared = { version = "3.2.0", default-features = false }
 multihash = { version = "0.16.3", default-features = false }
 num-derive = "0.3.3"
 num-traits = "0.2.15"
-rusqlite = { git = "https://github.com/sanderpick/rusqlite.git", branch = "wasm32-unknown-unknown", features = ["bundled", "load_extension"] }
+rusqlite = { git = "https://github.com/sanderpick/rusqlite.git", branch = "wasm32-unknown-unknown", features = [
+    "bundled",
+    "load_extension",
+] }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_tuple = "0.5"
 serde_with = "3.0.0"
