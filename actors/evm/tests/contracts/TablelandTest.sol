@@ -144,13 +144,14 @@ contract TablelandTest {
             )
         );
 
-        require(success, "call to DataCap actor failed");
+        require(success, "call to Tableland actor failed");
 
+        // ABI decode the response from call_actor
         (int256 exit, uint64 return_codec, bytes memory return_value) = abi
             .decode(data, (int256, uint64, bytes));
 
         if (return_codec == 0x00) {
-            // Misc.NONE_CODEC
+            // 0x00 is Misc.NONE_CODEC, which means the return value must be empty
             if (return_value.length != 0) {
                 revert("error");
             }
@@ -158,6 +159,8 @@ contract TablelandTest {
             return_codec == 0x51 || // Misc.CBOR_CODEC
             return_codec == 0x71 // Misc.DAG_CBOR_CODEC
         ) {
+            // Codec = 0x51 or 0x71means the return value must be a CBOR encoded bytes
+            // cannot be empty
             if (return_value.length == 0) {
                 revert("error");
             }
@@ -165,7 +168,7 @@ contract TablelandTest {
             revert("error");
         }
 
-        require(exit == 0, "DataCap actor returned an error");
+        require(exit == 0, "Tableland actor returned an error");
 
         return deserializeResponse(return_value);
     }
